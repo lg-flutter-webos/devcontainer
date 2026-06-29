@@ -1,0 +1,25 @@
+services:
+  flutter_webos_devcontainer:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        WEBOS_NDK_VERSION: ${WEBOS_NDK_VERSION:?error}
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+        # Building installs the webOS NDK under LG's SDK License Agreement.
+        # The build is gated on explicit acceptance — set WEBOS_NDK_ACCEPT_EULA=1
+        # in .env once you accept it (see README "webOS NDK License").
+        WEBOS_NDK_ACCEPT_EULA: ${WEBOS_NDK_ACCEPT_EULA:?accept the LG webOS NDK SDK License Agreement (see README) and set WEBOS_NDK_ACCEPT_EULA=1 in .devcontainer/.env to build}
+    image: flutter_webos:ndk-${WEBOS_NDK_VERSION:?error}
+    # Keep the container running; the GUI stack is started by the entrypoint.
+    command: sleep infinity
+    # NDK toolchains persist here across container rebuilds. On first creation the
+    # volume is populated from the image (the baked NDK version); additional
+    # versions added via `webos-ndk install` survive rebuilds.
+    volumes:
+      - webos-ndk:/opt/webos-ndk
+
+volumes:
+  webos-ndk:

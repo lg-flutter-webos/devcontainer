@@ -1,0 +1,32 @@
+{
+	"name": "Flutter webOS Dev Container",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "flutter_webos_devcontainer",
+	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	"remoteUser": "vscode",
+	"updateRemoteUserUID": true,
+
+	"mounts": [
+		"source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind"
+	],
+
+	"forwardPorts": [
+		5900,
+		6080
+	],
+	"portsAttributes": {
+		"5900": { "label": "VNC", "onAutoForward": "silent" },
+		"6080": { "label": "noVNC (browser GUI)", "onAutoForward": "notify" }
+	},
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"Dart-Code.flutter",
+				"Dart-Code.dart-code"
+			]
+		}
+	},
+
+	"postCreateCommand": "flutter-webos doctor -v"
+}

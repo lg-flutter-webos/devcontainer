@@ -1,0 +1,7 @@
+# Build context is this .devcontainer/ folder. Only the Dockerfile, start.sh,
+# and webos-ndk are used by the build; keep the rest of the context out.
+devcontainer.json
+devcontainer-lock.json
+docker-compose.yml
+.env
+.dockerignore

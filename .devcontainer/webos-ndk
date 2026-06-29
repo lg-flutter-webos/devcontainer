@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# webos-ndk — manage webOS NDK toolchains by version.
+#
+# Each NDK version (e.g. 11.2.0) installs side by side under $WEBOS_NDK_ROOT/<version>,
+# so additional versions can be added at runtime (no image rebuild) and persist across
+# rebuilds when that directory is a named volume. The active toolchain is selected
+# through the stable "active" symlink, so WEBOS_FLUTTER_NDK_ENV
+# (= $WEBOS_NDK_ROOT/active/env-setup) never has to change.
+#
+# The installer file name is derived from the version: only the version varies across
+# releases of the starfish / x86_64 / ca9v1 toolchain line.
+set -euo pipefail
+
+NDK_ROOT="${WEBOS_NDK_ROOT:-/opt/webos-ndk}"
+INSTALLER_PREFIX="webos-ndk-flutter-starfish-x86_64-ca9v1-"
+INSTALLER_SUFFIX=".sh"
+
+err() { echo "webos-ndk: $*" >&2; exit 1; }
+
+installer_for() { printf '%s%s%s' "$INSTALLER_PREFIX" "$1" "$INSTALLER_SUFFIX"; }
+
+cmd_install() {
+  local version="" url=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --url)   url="${2:?--url needs a value}"; shift 2 ;;
+      --url=*) url="${1#--url=}"; shift ;;
+      -*)      err "unknown option: $1" ;;
+      *)       [ -z "$version" ] && version="$1" || err "unexpected argument: $1"; shift ;;
+    esac
+  done
+  [ -n "$version" ] || err "usage: webos-ndk install <version> [--url <installer-url>]"
+
+  local dir="$NDK_ROOT/$version"
+  if [ -e "$dir/env-setup" ]; then
+    echo "webos-ndk: version $version already installed at $dir"
+    return 0
+  fi
+
+  # The installer presents LG's SDK License Agreement and only proceeds once it
+  # is accepted. Acceptance is an explicit user action, never silent:
+  #   WEBOS_NDK_ACCEPT_EULA=1  -> caller accepts; install non-interactively (-y)
+  #   else, on a TTY           -> the installer shows the EULA and prompts
+  #   else (e.g. image build)  -> abort with instructions (no hidden consent)
+  local accept_eula=""
+  case "${WEBOS_NDK_ACCEPT_EULA:-}" in
+    1|y|Y|yes|YES|true|TRUE) accept_eula=1 ;;
+  esac
+  if [ -z "$accept_eula" ] && [ ! -t 0 ]; then
+    err "installing the webOS NDK requires accepting the LG SDK License Agreement.
+  Review it (see README) and set WEBOS_NDK_ACCEPT_EULA=1 to accept and install
+  non-interactively, or run this command in an interactive terminal to read and
+  accept it there."
+  fi
+
+  # The installer file name is derived from the version and fetched from
+  # NDK_BASE_URL. Pass --url to install one from an explicit location instead
+  # (e.g. a version not yet published at the default base).
+  local installer
+  if [ -n "$url" ]; then
+    installer="$(basename "$url")"
+  else
+    : "${NDK_BASE_URL:?set NDK_BASE_URL, or pass --url <installer-url>}"
+    installer="$(installer_for "$version")"
+    # GitHub Releases serves assets at releases/download/<tag>/<file>; the release
+    # tag is the NDK version. (NDK_BASE_URL holds the segment up to .../download.)
+    url="$NDK_BASE_URL/$version/$installer"
+  fi
+
+  mkdir -p "$dir"
+  local tmp; tmp="$(mktemp -d)"
+  echo "webos-ndk: downloading $installer ..."
+  wget -q "$url" -O "$tmp/$installer" || { rm -rf "$tmp"; err "download failed: $url"; }
+  chmod +x "$tmp/$installer"
+  # Yocto-style relocatable installer: -y accepts the EULA and runs
+  # non-interactively, -d <install dir>. Without -y it shows the EULA and prompts
+  # for acceptance. It may exit non-zero even on success, so its exit code is
+  # tolerated and the resulting environment-setup file is asserted instead.
+  if [ -n "$accept_eula" ]; then
+    "$tmp/$installer" -y -d "$dir" || true
+  else
+    "$tmp/$installer" -d "$dir" || true
+  fi
+  rm -rf "$tmp"
+  local envfile; envfile="$(find "$dir" -maxdepth 1 -name 'environment-setup-*' | head -n1)"
+  [ -n "$envfile" ] || { rm -rf "$dir"; err "install failed: no environment-setup file under $dir"; }
+  ln -sfn "$(basename "$envfile")" "$dir/env-setup"
+  echo "webos-ndk: installed NDK $version"
+}
+
+cmd_use() {
+  local version="${1:?usage: webos-ndk use <version>}"
+  [ -e "$NDK_ROOT/$version/env-setup" ] || err "NDK $version not installed (run: webos-ndk install $version)"
+  ln -sfn "$version" "$NDK_ROOT/active"
+  echo "webos-ndk: active NDK -> $version"
+}
+
+cmd_list() {
+  local active=""
+  [ -L "$NDK_ROOT/active" ] && active="$(readlink "$NDK_ROOT/active")"
+  local found=""
+  for d in "$NDK_ROOT"/*/; do
+    [ -e "$d/env-setup" ] || continue
+    found=1
+    local name; name="$(basename "$d")"
+    if [ "$name" = "$active" ]; then echo "* $name (active)"; else echo "  $name"; fi
+  done
+  [ -n "$found" ] || echo "webos-ndk: no NDK installed"
+}
+
+cmd_current() {
+  [ -L "$NDK_ROOT/active" ] || err "no active NDK"
+  basename "$(readlink "$NDK_ROOT/active")"
+}
+
+case "${1:-}" in
+  install) shift; cmd_install "$@" ;;
+  use)     shift; cmd_use "$@" ;;
+  list)    shift; cmd_list "$@" ;;
+  current) shift; cmd_current "$@" ;;
+  *) cat >&2 <<EOF
+usage: webos-ndk <command>
+  install <version> [--url <installer-url>]
+                     install the NDK for a version. The installer is fetched by
+                     version from NDK_BASE_URL; pass --url to install from an
+                     explicit location (e.g. a version not yet published there).
+  use <version>      switch the active NDK toolchain
+  list               list installed NDKs (active marked with *)
+  current            print the active version
+
+Installing the NDK requires accepting the LG SDK License Agreement. On an
+interactive terminal the installer shows it and prompts; non-interactively set
+WEBOS_NDK_ACCEPT_EULA=1 to record acceptance.
+EOF
+     exit 1 ;;
+esac
