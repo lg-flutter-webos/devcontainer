@@ -75,6 +75,9 @@ ENV NDK_BASE_URL="https://github.com/lg-flutter-webos/ndk/releases/download" \
 COPY webos-ndk /usr/local/bin/webos-ndk
 RUN chmod +x /usr/local/bin/webos-ndk
 
+# Create the X11 sockets directory with proper permissions as root
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+
 # Create a non-root user and grant passwordless sudo.
 # UID/GID are build args so the container user can match the host owner of the
 # bind-mounted workspace (devcontainer also applies updateRemoteUserUID at runtime).
